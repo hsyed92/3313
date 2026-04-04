@@ -46,6 +46,23 @@ trap(struct trapframe *tf)
     return;
   }
 
+  // Feature 2: Catch page faults for Lazy Allocation
+  if(tf->trapno == T_PGFLT){
+    uint faddr = rcr2(); // Get the bad address that caused the fault
+    struct proc *curproc = myproc();
+    
+    // Make sure the address is inside our heap and the page is actually missing (err & 1 == 0)
+    if(curproc != 0 && faddr < curproc->sz && (tf->err & 1) == 0){
+      uint base_addr = PGROUNDDOWN(faddr);
+      // Give it a real physical page now
+      if(allocuvm(curproc->pgdir, base_addr, base_addr + PGSIZE) == 0){
+        cprintf("lazy allocation: out of memory\n");
+        curproc->killed = 1;
+      }
+      return; // Go back and try the instruction again
+    }
+  }
+
   switch(tf->trapno){
   case T_IRQ0 + IRQ_TIMER:
     if(cpuid() == 0){

@@ -51,8 +51,16 @@ sys_sbrk(void)
   if(argint(0, &n) < 0)
     return -1;
   addr = myproc()->sz;
-  if(growproc(n) < 0)
-    return -1;
+  
+  // Feature 2: Lazy Allocation
+  // Just bump the size without actually allocating physical memory if we're growing.
+  // If shrinking (n < 0), we still need growproc to clean up memory.
+  if(n < 0){
+    if(growproc(n) < 0)
+      return -1;
+  } else {
+    myproc()->sz += n;
+  }
   return addr;
 }
 

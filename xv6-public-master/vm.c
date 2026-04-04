@@ -324,9 +324,9 @@ copyuvm(pde_t *pgdir, uint sz)
     return 0;
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walkpgdir(pgdir, (void *) i, 0)) == 0)
-      panic("copyuvm: pte should exist");
+      continue; // Skip missing PTEs (needed for lazy allocation)
     if(!(*pte & PTE_P))
-      panic("copyuvm: page not present");
+      continue; // Skip pages that aren't actually allocated yet
     pa = PTE_ADDR(*pte);
     flags = PTE_FLAGS(*pte);
     if((mem = kalloc()) == 0)
