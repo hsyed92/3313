@@ -123,6 +123,7 @@ void            yield(void);
 void            shminit(void);
 int             shmget(int);
 int             shmclose(int);
+int             setbudget(int);
 
 // swtch.S
 void            swtch(struct context**, struct context*);

@@ -25,6 +25,7 @@ int sleep(int);
 int uptime(void);
 int shmget(int);
 int shmclose(int);
+int setbudget(int);
 
 // ulib.c
 int stat(const char*, struct stat*);

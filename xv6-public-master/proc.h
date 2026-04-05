@@ -49,6 +49,9 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+
+  int energy_budget;           // Max allowed address-space size in bytes, -1 means unlimited
+  int denied_allocs;           // Count denied memory/fork requests for debugging/demo
 };
 
 // Process memory is laid out contiguously, low addresses first:

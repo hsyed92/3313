@@ -90,6 +90,8 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
+  p->energy_budget = -1;
+  p->denied_allocs = 0;
 
   release(&ptable.lock);
 
@@ -155,6 +157,21 @@ userinit(void)
   release(&ptable.lock);
 }
 
+int
+setbudget(int bytes)
+{
+  struct proc *p = myproc();
+
+  if(bytes < -1)
+    return -1;
+
+  if(bytes != -1 && bytes < p->sz)
+    return -1;
+
+  p->energy_budget = bytes;
+  return 0;
+}
+
 // Grow current process's memory by n bytes.
 // Return 0 on success, -1 on failure.
 int
@@ -164,13 +181,20 @@ growproc(int n)
   struct proc *curproc = myproc();
 
   sz = curproc->sz;
+
   if(n > 0){
+    if(curproc->energy_budget != -1 && sz + n > (uint)curproc->energy_budget){
+      curproc->denied_allocs++;
+      return -1;
+    }
+
     if((sz = allocuvm(curproc->pgdir, sz, sz + n)) == 0)
       return -1;
   } else if(n < 0){
     if((sz = deallocuvm(curproc->pgdir, sz, sz + n)) == 0)
       return -1;
   }
+
   curproc->sz = sz;
   switchuvm(curproc);
   return 0;
@@ -185,6 +209,11 @@ fork(void)
   int i, pid;
   struct proc *np;
   struct proc *curproc = myproc();
+
+    if(curproc->energy_budget != -1 && curproc->sz > (uint)curproc->energy_budget){
+    curproc->denied_allocs++;
+    return -1;
+  }
 
   // Allocate process.
   if((np = allocproc()) == 0){
@@ -201,6 +230,8 @@ fork(void)
   np->sz = curproc->sz;
   np->parent = curproc;
   *np->tf = *curproc->tf;
+  np->energy_budget = curproc->energy_budget;
+  np->denied_allocs = 0;
 
   // Clear %eax so that fork returns 0 in the child.
   np->tf->eax = 0;
@@ -296,6 +327,8 @@ wait(void)
         p->parent = 0;
         p->name[0] = 0;
         p->killed = 0;
+        p->energy_budget = -1;
+        p->denied_allocs = 0;
         p->state = UNUSED;
         release(&ptable.lock);
         return pid;

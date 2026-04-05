@@ -124,6 +124,7 @@ extern int sys_uptime(void);
 extern int sys_seteco(void);
 extern int sys_shmget(void);
 extern int sys_shmclose(void);
+extern int sys_setbudget(void);
 
 static int (*syscalls[])(void) = {
 [SYS_fork]    sys_fork,
@@ -150,6 +151,7 @@ static int (*syscalls[])(void) = {
 [SYS_seteco]  sys_seteco,
 [SYS_shmget]  sys_shmget,
 [SYS_shmclose] sys_shmclose,
+[SYS_setbudget] sys_setbudget,
 };
 
 void

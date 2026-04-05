@@ -23,3 +23,4 @@
 #define SYS_seteco  22
 #define SYS_shmget  23
 #define SYS_shmclose 24
+#define SYS_setbudget 25

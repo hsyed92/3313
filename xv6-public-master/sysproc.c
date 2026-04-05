@@ -47,20 +47,24 @@ sys_sbrk(void)
 {
   int addr;
   int n;
+  struct proc *p = myproc();
 
   if(argint(0, &n) < 0)
     return -1;
-  addr = myproc()->sz;
-  
-  // Feature 2: Lazy Allocation
-  // Just bump the size without actually allocating physical memory if we're growing.
-  // If shrinking (n < 0), we still need growproc to clean up memory.
+
+  addr = p->sz;
+
   if(n < 0){
     if(growproc(n) < 0)
       return -1;
-  } else {
-    myproc()->sz += n;
+  } else if(n > 0){
+    if(p->energy_budget != -1 && p->sz + n > (uint)p->energy_budget){
+      p->denied_allocs++;
+      return -1;
+    }
+    p->sz += n;
   }
+
   return addr;
 }
 
@@ -110,6 +114,17 @@ sys_seteco(void)
     
   eco_mode = mode;
   return 0;
+}
+
+int
+sys_setbudget(void)
+{
+  int bytes;
+
+  if(argint(0, &bytes) < 0)
+    return -1;
+
+  return setbudget(bytes);
 }
 
 // Create or attach to a shared page by key

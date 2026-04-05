@@ -184,6 +184,7 @@ UPROGS=\
 	_suspend\
 	_lazy_test\
 	_shmtest\
+	_budget_test\
 
 fs.img: mkfs README $(UPROGS)
 	./mkfs fs.img README $(UPROGS)
