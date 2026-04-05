@@ -111,3 +111,25 @@ sys_seteco(void)
   eco_mode = mode;
   return 0;
 }
+
+// Create or attach to a shared page by key
+int
+sys_shmget(void)
+{
+  int key;
+
+  if(argint(0, &key) < 0)
+    return -1;
+  return shmget(key);
+}
+
+// Detach the caller from a shared page
+int
+sys_shmclose(void)
+{
+  int key;
+
+  if(argint(0, &key) < 0)
+    return -1;
+  return shmclose(key);
+}

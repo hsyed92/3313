@@ -59,12 +59,30 @@ int
 argptr(int n, char **pp, int size)
 {
   int i;
+  uint end;
   struct proc *curproc = myproc();
  
   if(argint(n, &i) < 0)
     return -1;
-  if(size < 0 || (uint)i >= curproc->sz || (uint)i+size > curproc->sz)
+  if(size < 0)
     return -1;
+
+  end = (uint)i + size;
+  if(end < (uint)i)
+    return -1;
+
+  // Normal heap/stack pointers are still validated against proc->sz
+  if((uint)i < curproc->sz && end <= curproc->sz){
+    *pp = (char*)i;
+    return 0;
+  }
+
+  // Also accept pointers inside mapped shared-memory pages
+  if(uva2ka(curproc->pgdir, (char*)i) == 0)
+    return -1;
+  if(size > 0 && uva2ka(curproc->pgdir, (char*)(end - 1)) == 0)
+    return -1;
+
   *pp = (char*)i;
   return 0;
 }
@@ -104,6 +122,8 @@ extern int sys_wait(void);
 extern int sys_write(void);
 extern int sys_uptime(void);
 extern int sys_seteco(void);
+extern int sys_shmget(void);
+extern int sys_shmclose(void);
 
 static int (*syscalls[])(void) = {
 [SYS_fork]    sys_fork,
@@ -128,6 +148,8 @@ static int (*syscalls[])(void) = {
 [SYS_mkdir]   sys_mkdir,
 [SYS_close]   sys_close,
 [SYS_seteco]  sys_seteco,
+[SYS_shmget]  sys_shmget,
+[SYS_shmclose] sys_shmclose,
 };
 
 void

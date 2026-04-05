@@ -5,10 +5,34 @@
 #include "memlayout.h"
 #include "mmu.h"
 #include "proc.h"
+#include "spinlock.h"
 #include "elf.h"
 
 extern char data[];  // defined by kernel.ld
 pde_t *kpgdir;  // for use in scheduler()
+
+// Track shared-memory pages by key and reference count
+struct shmentry {
+  int used;
+  int key;
+  uint pa;
+  int refcnt;
+};
+
+static struct {
+  struct spinlock lock;
+  struct shmentry seg[NSHM];
+} shmtable;
+
+static int shmdecref(uint pa);
+
+// Initialize the shared-memory table
+void
+shminit(void)
+{
+  initlock(&shmtable.lock, "shmtable");
+  memset(shmtable.seg, 0, sizeof(shmtable.seg));
+}
 
 // Set up CPU's kernel segment descriptors.
 // Run once on entry on each CPU.
@@ -270,8 +294,15 @@ deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
       pa = PTE_ADDR(*pte);
       if(pa == 0)
         panic("kfree");
-      char *v = P2V(pa);
-      kfree(v);
+
+      // Free shared pages through the reference counter
+      if(*pte & PTE_SHM){
+        if(shmdecref(pa) < 0)
+          panic("deallocuvm: shmdecref");
+      } else {
+        char *v = P2V(pa);
+        kfree(v);
+      }
       *pte = 0;
     }
   }
@@ -352,6 +383,8 @@ uva2ka(pde_t *pgdir, char *uva)
   pte_t *pte;
 
   pte = walkpgdir(pgdir, uva, 0);
+  if(pte == 0)
+    return 0;
   if((*pte & PTE_P) == 0)
     return 0;
   if((*pte & PTE_U) == 0)
@@ -383,6 +416,147 @@ copyout(pde_t *pgdir, uint va, void *p, uint len)
     va = va0 + PGSIZE;
   }
   return 0;
+}
+
+// Decrement a shared page's reference count and free it at zero
+static int
+shmdecref(uint pa)
+{
+  int i;
+  char *mem;
+
+  mem = 0;
+  acquire(&shmtable.lock);
+  for(i = 0; i < NSHM; i++){
+    if(shmtable.seg[i].used && shmtable.seg[i].pa == pa){
+      if(shmtable.seg[i].refcnt < 1)
+        panic("shmdecref");
+      shmtable.seg[i].refcnt--;
+      if(shmtable.seg[i].refcnt == 0){
+        mem = (char*)P2V(shmtable.seg[i].pa);
+        shmtable.seg[i].used = 0;
+        shmtable.seg[i].key = 0;
+        shmtable.seg[i].pa = 0;
+        shmtable.seg[i].refcnt = 0;
+      }
+      release(&shmtable.lock);
+      if(mem)
+        kfree(mem);
+      return 0;
+    }
+  }
+  release(&shmtable.lock);
+  return -1;
+}
+
+// Create or attach a shared page for the given key
+int
+shmget(int key)
+{
+  struct proc *curproc;
+  pte_t *pte;
+  char *mem;
+  uint pa, va;
+  int i, free_slot;
+
+  if(key < 0)
+    return -1;
+
+  curproc = myproc();
+  if(curproc->sz > SHMBASE)
+    return -1;
+  free_slot = -1;
+
+  acquire(&shmtable.lock);
+  for(i = 0; i < NSHM; i++){
+    if(shmtable.seg[i].used && shmtable.seg[i].key == key){
+      va = SHMBASE + i * PGSIZE;
+      pte = walkpgdir(curproc->pgdir, (void*)va, 0);
+      if(pte && (*pte & PTE_P)){
+        if(((*pte & PTE_SHM) == 0) || PTE_ADDR(*pte) != shmtable.seg[i].pa){
+          release(&shmtable.lock);
+          return -1;
+        }
+        release(&shmtable.lock);
+        return va;
+      }
+
+      pa = shmtable.seg[i].pa;
+      shmtable.seg[i].refcnt++;
+      release(&shmtable.lock);
+
+      if(mappages(curproc->pgdir, (char*)va, PGSIZE, pa,
+                  PTE_W|PTE_U|PTE_SHM) < 0){
+        shmdecref(pa);
+        return -1;
+      }
+      return va;
+    }
+    if(!shmtable.seg[i].used && free_slot < 0)
+      free_slot = i;
+  }
+
+  if(free_slot < 0){
+    release(&shmtable.lock);
+    return -1;
+  }
+
+  if((mem = kalloc()) == 0){
+    release(&shmtable.lock);
+    return -1;
+  }
+  memset(mem, 0, PGSIZE);
+
+  shmtable.seg[free_slot].used = 1;
+  shmtable.seg[free_slot].key = key;
+  shmtable.seg[free_slot].pa = V2P(mem);
+  shmtable.seg[free_slot].refcnt = 1;
+  pa = shmtable.seg[free_slot].pa;
+  va = SHMBASE + free_slot * PGSIZE;
+  release(&shmtable.lock);
+
+  if(mappages(curproc->pgdir, (char*)va, PGSIZE, pa,
+              PTE_W|PTE_U|PTE_SHM) < 0){
+    shmdecref(pa);
+    return -1;
+  }
+  return va;
+}
+
+// Unmap the caller from a shared page
+int
+shmclose(int key)
+{
+  struct proc *curproc;
+  pte_t *pte;
+  uint pa, va;
+  int i;
+
+  if(key < 0)
+    return -1;
+
+  curproc = myproc();
+  acquire(&shmtable.lock);
+  for(i = 0; i < NSHM; i++){
+    if(shmtable.seg[i].used && shmtable.seg[i].key == key){
+      va = SHMBASE + i * PGSIZE;
+      pte = walkpgdir(curproc->pgdir, (void*)va, 0);
+      if(pte == 0 || (*pte & PTE_P) == 0 || (*pte & PTE_SHM) == 0){
+        release(&shmtable.lock);
+        return -1;
+      }
+      pa = PTE_ADDR(*pte);
+      *pte = 0;
+      release(&shmtable.lock);
+
+      if(shmdecref(pa) < 0)
+        return -1;
+      switchuvm(curproc);
+      return 0;
+    }
+  }
+  release(&shmtable.lock);
+  return -1;
 }
 
 //PAGEBREAK!
