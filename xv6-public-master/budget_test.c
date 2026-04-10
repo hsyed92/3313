@@ -11,13 +11,17 @@ main(void)
 
   printf(1, "=== budget test start ===\n");
 
-  // Set budget to 2 pages
-  if(setbudget(2 * 4096) < 0){
-    printf(1, "setbudget failed\n");
-    exit();
+  // Budget is total allowed sz; after exec, sz is already program + stack pages.
+  // Allow exactly two more heap pages beyond the current break.
+  {
+    uint base = (uint)sbrk(0);
+    uint cap = base + 2 * 4096;
+    if(setbudget((int)cap) < 0){
+      printf(1, "setbudget failed (try cap=%d, initial sz issue)\n", cap);
+      exit();
+    }
+    printf(1, "budget set to %d bytes (current sz %d + 2 pages)\n", cap, base);
   }
-
-  printf(1, "budget set to %d bytes\n", 2 * 4096);
 
   // First page should succeed
   p1 = sbrk(4096);

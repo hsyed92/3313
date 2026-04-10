@@ -210,7 +210,8 @@ fork(void)
   struct proc *np;
   struct proc *curproc = myproc();
 
-    if(curproc->energy_budget != -1 && curproc->sz > (uint)curproc->energy_budget){
+  if(curproc->energy_budget != -1 &&
+     curproc->sz >= (uint)curproc->energy_budget){
     curproc->denied_allocs++;
     return -1;
   }
